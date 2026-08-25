@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary_sky_blue">#4A90E2</color>
+    <color name="secondary_light_purple">#B39DDB</color>
+    <color name="light_purple_container">#F3E8FF</color>
+    <color name="pure_white">#FFFFFF</color>
+    <color name="dark_gray">#1A1A2E</color>
+    <color name="medium_gray">#4A4A4A</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

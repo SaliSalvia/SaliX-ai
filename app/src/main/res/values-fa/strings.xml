@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SalviaAIZ</string>
+    <string name="welcome_title">به SalviaAIZ خوش آمدید</string>
+    <string name="welcome_subtitle">گفتگوی هوشمند با GLM-4.6 و تولید تصویر CogView-3</string>
+    <string name="api_key_label">کلید دسترسی Z.ai API</string>
+    <string name="api_key_placeholder">کلید API خود را وارد کنید</string>
+    <string name="btn_start">شروع</string>
+    <string name="tab_chat">گفتگو</string>
+    <string name="tab_image">تصویرسازی</string>
+    <string name="tab_settings">تنظیمات</string>
+    <string name="chat_hint">از GLM-4.6 هر سوالی دارید بپرسید…</string>
+    <string name="chat_welcome_title">امروز چطور می‌تونم کمکتون کنم؟</string>
+    <string name="chat_welcome_desc">پاسخ‌های بلادرنگ GLM-4.6 همراه با پشتیبانی از تحلیل تصاویر چندرسانه‌ای.</string>
+    <string name="image_prompt_label">توصیف تصویر مورد نظر</string>
+    <string name="image_prompt_placeholder">توصیف تصویری که می‌خواهید بسازید را بنویسید…</string>
+    <string name="btn_generate">تولید تصویر</string>
+    <string name="generating_image">در حال ساخت تصویر با CogView-3…</string>
+    <string name="settings_title">تنظیمات</string>
+    <string name="settings_api_key">پیکربندی کلید API</string>
+    <string name="settings_models">مدل‌های هوش مصنوعی</string>
+    <string name="settings_about">درباره SalviaAIZ</string>
+    <string name="btn_save">ذخیره</string>
+    <string name="btn_clear">پاک‌سازی</string>
+</resources>
