@@ -43,7 +43,7 @@ jobs:
 
     - name: Build Debug APK with Gradle
       run: |
-        gradle :app:assembleDebug --stacktrace --no-daemon
+        gradle :app:assembleDebug --no-build-cache --no-configuration-cache --no-daemon --stacktrace
 
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
