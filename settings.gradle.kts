@@ -24,4 +24,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "SalviaAIZ"
 
+buildCache {
+  local {
+    isEnabled = false
+  }
+}
+
 include(":app")
