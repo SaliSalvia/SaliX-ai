@@ -1,6 +1,0 @@
-{
-  "name": "SalviaAIZ",
-  "description": "Native Android AI client for Z.ai featuring GLM-4.6 streaming chat, multimodal vision, and CogView-3 image generation.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
