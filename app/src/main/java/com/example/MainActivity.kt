@@ -64,6 +64,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -204,6 +206,33 @@ enum class MainTab {
     SETTINGS
 }
 
+data class AiProviderProfile(
+    val id: String,
+    val displayName: String,
+    val baseUrl: String,
+    val defaultChatModel: String,
+    val defaultVisionModel: String = defaultChatModel,
+    val defaultImageModel: String = "",
+    val modelsPath: String = "/models",
+    val balancePath: String = "",
+    val notes: String
+)
+
+data class ProviderModelInfo(
+    val id: String,
+    val isFree: Boolean = false,
+    val priceLabel: String = "Provider pricing"
+)
+
+val SupportedProviderProfiles = listOf(
+    AiProviderProfile("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-oss-120b", "qwen/qwen2.5-vl-72b-instruct", "", balancePath = "/credits", notes = "OpenAI-compatible chat, vision, tools and many free/paid routed models."),
+    AiProviderProfile("groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "meta-llama/llama-4-scout-17b-16e-instruct", "", notes = "Fast OpenAI-compatible inference for text, tools and selected multimodal models."),
+    AiProviderProfile("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1", "meta/llama-3.1-70b-instruct", "microsoft/phi-3-vision-128k-instruct", "", notes = "OpenAI-compatible NIM endpoints for accelerated models."),
+    AiProviderProfile("google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.0-flash", "gemini-2.0-flash", "imagen-3.0-generate-002", notes = "Gemini OpenAI-compatible endpoint for chat, vision and tool calling."),
+    AiProviderProfile("zai", "Z.ai", "https://api.z.ai/api/paas/v4", "glm-4.6", "glm-4v", "cogview-3", notes = "Native OpenAI-style chat plus CogView image generation."),
+    AiProviderProfile("custom", "Custom OpenAI-compatible", "https://api.example.com/v1", "model-id", "model-id", "", notes = "Use any provider that exposes /chat/completions and /models with Bearer auth.")
+)
+
 // ==========================================
 // VIEWMODEL
 // ==========================================
@@ -214,6 +243,27 @@ class SalviaViewModel(context: Context) : ViewModel() {
 
     private val _apiKey = MutableStateFlow(prefs.getString("api_key", "") ?: "")
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()
+
+    private val _providerId = MutableStateFlow(prefs.getString("provider_id", "openrouter") ?: "openrouter")
+    val providerId: StateFlow<String> = _providerId.asStateFlow()
+
+    private val _baseUrl = MutableStateFlow(prefs.getString("base_url", SupportedProviderProfiles.first().baseUrl) ?: SupportedProviderProfiles.first().baseUrl)
+    val baseUrl: StateFlow<String> = _baseUrl.asStateFlow()
+
+    private val _chatModel = MutableStateFlow(prefs.getString("chat_model", SupportedProviderProfiles.first().defaultChatModel) ?: SupportedProviderProfiles.first().defaultChatModel)
+    val chatModel: StateFlow<String> = _chatModel.asStateFlow()
+
+    private val _visionModel = MutableStateFlow(prefs.getString("vision_model", SupportedProviderProfiles.first().defaultVisionModel) ?: SupportedProviderProfiles.first().defaultVisionModel)
+    val visionModel: StateFlow<String> = _visionModel.asStateFlow()
+
+    private val _imageModel = MutableStateFlow(prefs.getString("image_model", SupportedProviderProfiles.first().defaultImageModel) ?: SupportedProviderProfiles.first().defaultImageModel)
+    val imageModel: StateFlow<String> = _imageModel.asStateFlow()
+
+    private val _models = MutableStateFlow<List<ProviderModelInfo>>(emptyList())
+    val models: StateFlow<List<ProviderModelInfo>> = _models.asStateFlow()
+
+    private val _providerStatus = MutableStateFlow("Connect a provider to sync models and credits.")
+    val providerStatus: StateFlow<String> = _providerStatus.asStateFlow()
 
     private val _currentScreen = MutableStateFlow(if (_apiKey.value.isNotBlank()) Screen.MAIN else Screen.WELCOME)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
@@ -261,6 +311,78 @@ class SalviaViewModel(context: Context) : ViewModel() {
         prefs.edit().remove("api_key").apply()
         _apiKey.value = ""
         _currentScreen.value = Screen.WELCOME
+    }
+
+    fun applyProvider(profile: AiProviderProfile) {
+        prefs.edit()
+            .putString("provider_id", profile.id)
+            .putString("base_url", profile.baseUrl)
+            .putString("chat_model", profile.defaultChatModel)
+            .putString("vision_model", profile.defaultVisionModel)
+            .putString("image_model", profile.defaultImageModel)
+            .apply()
+        _providerId.value = profile.id
+        _baseUrl.value = profile.baseUrl
+        _chatModel.value = profile.defaultChatModel
+        _visionModel.value = profile.defaultVisionModel
+        _imageModel.value = profile.defaultImageModel
+        _providerStatus.value = "${profile.displayName} selected. Add your key, then sync models."
+    }
+
+    fun saveProviderSettings(baseUrl: String, chatModel: String, visionModel: String, imageModel: String) {
+        val normalizedBase = baseUrl.trim().trimEnd('/')
+        prefs.edit()
+            .putString("base_url", normalizedBase)
+            .putString("chat_model", chatModel.trim())
+            .putString("vision_model", visionModel.trim())
+            .putString("image_model", imageModel.trim())
+            .apply()
+        _baseUrl.value = normalizedBase
+        _chatModel.value = chatModel.trim()
+        _visionModel.value = visionModel.trim()
+        _imageModel.value = imageModel.trim()
+        _providerStatus.value = "Provider settings saved."
+    }
+
+    fun syncProviderMetadata() {
+        val currentKey = _apiKey.value
+        if (currentKey.isBlank()) {
+            _providerStatus.value = "Add an API key before syncing provider metadata."
+            return
+        }
+        _providerStatus.value = "Syncing models and account metadata…"
+        viewModelScope.launch(Dispatchers.IO) {
+            val profile = SupportedProviderProfiles.firstOrNull { it.id == _providerId.value }
+            val modelResult = runCatching {
+                val request = Request.Builder()
+                    .url("${_baseUrl.value.trimEnd('/')}${profile?.modelsPath ?: "/models"}")
+                    .addHeader("Authorization", "Bearer $currentKey")
+                    .get()
+                    .build()
+                okHttpClient.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) error("Models: HTTP ${response.code}")
+                    parseModels(body)
+                }
+            }
+            val creditResult = runCatching {
+                val path = profile?.balancePath.orEmpty()
+                if (path.isBlank()) return@runCatching "Credit endpoint is provider-specific."
+                val request = Request.Builder()
+                    .url("${_baseUrl.value.trimEnd('/')}$path")
+                    .addHeader("Authorization", "Bearer $currentKey")
+                    .get()
+                    .build()
+                okHttpClient.newCall(request).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) "Credits: HTTP ${response.code}" else summarizeCredit(body)
+                }
+            }
+            withContext(Dispatchers.Main) {
+                _models.value = modelResult.getOrElse { emptyList() }
+                _providerStatus.value = "Models: ${_models.value.size} found • ${creditResult.getOrDefault("Credit endpoint is provider-specific.")}"
+            }
+        }
     }
 
     fun setTab(tab: MainTab) {
@@ -345,7 +467,7 @@ class SalviaViewModel(context: Context) : ViewModel() {
 
                 val requestJson = JSONObject()
                 // Use GLM-4.6 or glm-4v if image attached
-                val modelName = if (imageBase64 != null) "glm-4v" else "glm-4.6"
+                val modelName = if (imageBase64 != null) _visionModel.value else _chatModel.value
                 requestJson.put("model", modelName)
                 requestJson.put("stream", true)
                 requestJson.put("messages", jsonMessages)
@@ -354,7 +476,7 @@ class SalviaViewModel(context: Context) : ViewModel() {
                 val requestBody = requestJson.toString().toRequestBody(mediaType)
 
                 val request = Request.Builder()
-                    .url("https://api.z.ai/api/paas/v4/chat/completions")
+                    .url("${_baseUrl.value.trimEnd('/')}/chat/completions")
                     .addHeader("Authorization", "Bearer $currentKey")
                     .addHeader("Content-Type", "application/json")
                     .addHeader("Accept", "text/event-stream")
@@ -461,7 +583,7 @@ class SalviaViewModel(context: Context) : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val requestJson = JSONObject()
-                requestJson.put("model", "cogview-3")
+                requestJson.put("model", _imageModel.value.ifBlank { "cogview-3" })
                 requestJson.put("prompt", prompt)
                 requestJson.put("size", size)
 
@@ -469,7 +591,7 @@ class SalviaViewModel(context: Context) : ViewModel() {
                 val requestBody = requestJson.toString().toRequestBody(mediaType)
 
                 val request = Request.Builder()
-                    .url("https://api.z.ai/api/paas/v4/images/generations")
+                    .url("${_baseUrl.value.trimEnd('/')}/images/generations")
                     .addHeader("Authorization", "Bearer $currentKey")
                     .addHeader("Content-Type", "application/json")
                     .post(requestBody)
@@ -514,7 +636,7 @@ class SalviaViewModel(context: Context) : ViewModel() {
                 }
 
                 withContext(Dispatchers.Main) {
-                    _imageError.value = "No image URL returned by CogView-3."
+                    _imageError.value = "No image URL returned by the selected image model."
                     _isImageGenerating.value = false
                 }
 
@@ -525,6 +647,36 @@ class SalviaViewModel(context: Context) : ViewModel() {
                 }
             }
         }
+    }
+}
+
+fun parseModels(body: String): List<ProviderModelInfo> {
+    val root = JSONObject(body)
+    val data = root.optJSONArray("data") ?: return emptyList()
+    return (0 until data.length()).mapNotNull { index ->
+        val item = data.optJSONObject(index) ?: return@mapNotNull null
+        val id = item.optString("id").ifBlank { item.optString("name") }
+        if (id.isBlank()) return@mapNotNull null
+        val pricing = item.optJSONObject("pricing")
+        val promptPrice = pricing?.optString("prompt")?.toDoubleOrNull() ?: 1.0
+        val completionPrice = pricing?.optString("completion")?.toDoubleOrNull() ?: 1.0
+        ProviderModelInfo(
+            id = id,
+            isFree = promptPrice == 0.0 && completionPrice == 0.0,
+            priceLabel = if (promptPrice == 0.0 && completionPrice == 0.0) "Free" else "Paid / metered"
+        )
+    }
+}
+
+fun summarizeCredit(body: String): String {
+    val root = JSONObject(body)
+    val data = root.optJSONObject("data") ?: root
+    val total = data.opt("total_credits") ?: data.opt("total") ?: data.opt("balance") ?: data.opt("credit")
+    val free = data.opt("total_granted") ?: data.opt("free") ?: data.opt("daily_free")
+    return when {
+        total != null && free != null -> "credits: $total total, $free free/granted"
+        total != null -> "credits/balance: $total"
+        else -> "credit data available from provider"
     }
 }
 
@@ -846,7 +998,7 @@ fun WelcomeScreen(
                     if (apiKeyText.isNotBlank()) {
                         onSaveApiKey(apiKeyText)
                     } else {
-                        Toast.makeText(context, "Please enter a valid Z.ai API Key", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Please enter a valid provider API key", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier
@@ -875,7 +1027,7 @@ fun WelcomeScreen(
                 border = BorderStroke(1.dp, GlassBorder)
             ) {
                 Text(
-                    text = "Z.ai Endpoint: https://api.z.ai/api/paas/v4/",
+                    text = "OpenAI-compatible providers: OpenRouter, Groq, NVIDIA, Google, Z.ai & custom",
                     fontSize = 12.sp,
                     color = MediumGray,
                     textAlign = TextAlign.Center,
@@ -1070,7 +1222,7 @@ fun ChatScreen(viewModel: SalviaViewModel) {
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "GLM-4.6 Chat",
+                                text = "Universal AI Chat",
                                 fontWeight = FontWeight.Bold,
                                 color = DarkGray,
                                 fontSize = 18.sp
@@ -1082,7 +1234,7 @@ fun ChatScreen(viewModel: SalviaViewModel) {
                                 border = BorderStroke(1.dp, GlassBorder)
                             ) {
                                 Text(
-                                    text = "Z.ai Streaming",
+                                    text = "Streaming + Vision",
                                     fontSize = 11.sp,
                                     color = SkyBlue,
                                     fontWeight = FontWeight.Bold,
@@ -1226,7 +1378,7 @@ fun ChatScreen(viewModel: SalviaViewModel) {
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Image attached for GLM-4v Vision",
+                            text = "File attached for multimodal vision",
                             fontSize = 13.sp,
                             color = DarkGray,
                             fontWeight = FontWeight.Medium,
@@ -1493,7 +1645,7 @@ fun ImageScreen(viewModel: SalviaViewModel) {
                     title = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "CogView-3 Studio",
+                                text = "Image Studio",
                                 fontWeight = FontWeight.Bold,
                                 color = DarkGray,
                                 fontSize = 18.sp
@@ -1505,7 +1657,7 @@ fun ImageScreen(viewModel: SalviaViewModel) {
                                 border = BorderStroke(1.dp, GlassBorder)
                             ) {
                                 Text(
-                                    text = "Text-to-Image",
+                                    text = "Provider model",
                                     fontSize = 11.sp,
                                     color = SkyBlue,
                                     fontWeight = FontWeight.Bold,
@@ -1646,7 +1798,7 @@ fun ImageScreen(viewModel: SalviaViewModel) {
                                 strokeWidth = 2.dp
                             )
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text("Generating with CogView-3…", fontWeight = FontWeight.Bold)
+                            Text("Generating with selected model…", fontWeight = FontWeight.Bold)
                         } else {
                             Icon(
                                 imageVector = Icons.Default.AutoAwesome,
@@ -1883,6 +2035,25 @@ fun ImageScreen(viewModel: SalviaViewModel) {
     }
 }
 
+@Composable
+fun ProviderChip(profile: AiProviderProfile, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) SkyBlue else FrostedGlassContainer,
+        border = BorderStroke(1.dp, if (selected) SkyBlue else GlassBorderPurple),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = profile.displayName,
+            color = if (selected) PureWhite else DarkGray,
+            fontSize = 11.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        )
+    }
+}
+
 // ==========================================
 // E. SETTINGS SCREEN
 // ==========================================
@@ -1890,8 +2061,19 @@ fun ImageScreen(viewModel: SalviaViewModel) {
 @Composable
 fun SettingsScreen(viewModel: SalviaViewModel) {
     val apiKey by viewModel.apiKey.collectAsState()
+    val providerId by viewModel.providerId.collectAsState()
+    val baseUrl by viewModel.baseUrl.collectAsState()
+    val chatModel by viewModel.chatModel.collectAsState()
+    val visionModel by viewModel.visionModel.collectAsState()
+    val imageModel by viewModel.imageModel.collectAsState()
+    val providerStatus by viewModel.providerStatus.collectAsState()
+    val models by viewModel.models.collectAsState()
     var isEditingKey by remember { mutableStateOf(false) }
     var keyInput by remember { mutableStateOf(apiKey) }
+    var baseUrlInput by remember(baseUrl) { mutableStateOf(baseUrl) }
+    var chatModelInput by remember(chatModel) { mutableStateOf(chatModel) }
+    var visionModelInput by remember(visionModel) { mutableStateOf(visionModel) }
+    var imageModelInput by remember(imageModel) { mutableStateOf(imageModel) }
     var showClearDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
@@ -1996,7 +2178,7 @@ fun SettingsScreen(viewModel: SalviaViewModel) {
                             value = keyInput,
                             onValueChange = { keyInput = it },
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Enter Z.ai API Key", color = MediumGray) },
+                            placeholder = { Text("Enter provider API Key", color = MediumGray) },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -2026,6 +2208,70 @@ fun SettingsScreen(viewModel: SalviaViewModel) {
                                 Text("Cancel", color = MediumGray)
                             }
                         }
+                    }
+                }
+            }
+
+
+            // Universal Provider Hub
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                backgroundColor = FrostedGlassWhite
+            ) {
+                Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = IceCyan, modifier = Modifier.size(34.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(imageVector = Icons.Default.CloudSync, contentDescription = null, tint = SkyBlue, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Universal Provider Hub", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DarkGray)
+                            Text("OpenRouter, Groq, NVIDIA, Google, Z.ai or custom OpenAI-compatible API", fontSize = 12.sp, color = MediumGray)
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SupportedProviderProfiles.take(3).forEach { profile ->
+                            ProviderChip(profile, providerId == profile.id) { viewModel.applyProvider(profile) }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SupportedProviderProfiles.drop(3).forEach { profile ->
+                            ProviderChip(profile, providerId == profile.id) { viewModel.applyProvider(profile) }
+                        }
+                    }
+
+                    OutlinedTextField(value = baseUrlInput, onValueChange = { baseUrlInput = it }, label = { Text("Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = chatModelInput, onValueChange = { chatModelInput = it }, label = { Text("Chat / agent model") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = visionModelInput, onValueChange = { visionModelInput = it }, label = { Text("Vision / file model") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                    OutlinedTextField(value = imageModelInput, onValueChange = { imageModelInput = it }, label = { Text("Image model") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { viewModel.saveProviderSettings(baseUrlInput, chatModelInput, visionModelInput, imageModelInput) }, colors = ButtonDefaults.buttonColors(containerColor = SkyBlue), shape = RoundedCornerShape(12.dp)) { Text("Save Provider", color = PureWhite) }
+                        Button(onClick = { viewModel.syncProviderMetadata() }, colors = ButtonDefaults.buttonColors(containerColor = FrostedGlassContainer, contentColor = DarkGray), border = BorderStroke(1.dp, GlassBorderPurple), shape = RoundedCornerShape(12.dp)) { Text("Sync Models", color = DarkGray) }
+                    }
+
+                    Text(providerStatus, fontSize = 12.sp, color = MediumGray)
+                    if (models.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            models.take(8).forEach { model ->
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(model.id, fontSize = 12.sp, color = DarkGray, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    Text(if (model.isFree) "Free" else model.priceLabel, fontSize = 11.sp, color = if (model.isFree) SkyBlue else MediumGray)
+                                }
+                            }
+                            if (models.size > 8) Text("+${models.size - 8} more models", fontSize = 11.sp, color = MediumGray)
+                        }
+                    }
+
+                    HorizontalDivider(color = LightPurple.copy(alpha = 0.3f))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Code, contentDescription = null, tint = SkyBlue, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Agent-ready: streaming, vision files, tool/function-calling payloads and code-workspace prompts are preserved when the selected API supports them.", fontSize = 12.sp, color = MediumGray)
                     }
                 }
             }
@@ -2105,10 +2351,10 @@ fun SettingsScreen(viewModel: SalviaViewModel) {
                         color = DarkGray
                     )
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text(text = "SalviaAIZ v1.0.0", fontSize = 13.sp, color = DarkGray, fontWeight = FontWeight.SemiBold)
-                    Text(text = "Base API: https://api.z.ai/api/paas/v4/", fontSize = 12.sp, color = MediumGray)
+                    Text(text = "SalviaAI v1.0.0", fontSize = 13.sp, color = DarkGray, fontWeight = FontWeight.SemiBold)
+                    Text(text = "Universal AI workspace for OpenAI-compatible providers, model discovery and multimodal agents.", fontSize = 12.sp, color = MediumGray)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "Icy modern visual design with Jetpack Compose & Material 3.", fontSize = 12.sp, color = MediumGray)
+                    Text(text = "Violet crystal UI with fast Jetpack Compose & Material 3.", fontSize = 12.sp, color = MediumGray)
                 }
             }
         }
